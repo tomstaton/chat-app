@@ -1,6 +1,8 @@
 import React, { Component } from "react";
 import { View, Platform, KeyboardAvoidingView } from "react-native";
 import { GiftedChat, Bubble } from "react-native-gifted-chat";
+import NetInfo from "@react-native-community/netinfo";
+import { AsyncStorage } from "react-native";
 
 const firebase = require("firebase");
 require("firebase/firestore");
@@ -37,52 +39,74 @@ export default class Chat extends Component {
   }
 
   componentDidMount() {
-    this.authUnsubscribe = firebase.auth().onAuthStateChanged((user) => {
-      if (!user) {
-        firebase.auth().signInAnonymously();
-      }
-      this.setState({
-        uid: user.uid,
-        messages: [],
-      });
-      this.unsubscribe = this.referenceChatMessages
-        .orderBy("createdAt", "desc")
-        .onSnapshot(this.onCollectionUpdate);
-    });
-
     let name = this.props.route.params.name;
     this.props.navigation.setOptions({ title: name });
 
-    this.referenceMessagesUser = firebase
-      .firestore()
-      .collection("messages")
-      .where("uid", "==", this.state.uid);
+    NetInfo.fetch().then((connection) => {
+      if (connection.isConnected) {
+        console.log("online");
+
+        this.authUnsubscribe = firebase.auth().onAuthStateChanged((user) => {
+          if (!user) {
+            firebase.auth().signInAnonymously();
+          }
+
+          this.setState({
+            uid: user.uid,
+            messages: [],
+          });
+          this.referenceMessagesUser = firebase
+            .firestore()
+            .collection("messages")
+            .where("uid", "==", this.state.uid);
+          this.unsubscribe = this.referenceChatMessages
+            .orderBy("createdAt", "desc")
+            .onSnapshot(this.onCollectionUpdate);
+        });
+      } else {
+        console.log("offline");
+        this.setState({ isConnected: false });
+        this.getMessages();
+      }
+    });
   }
-  //   this.setState({
-  //     messages: [
-  //       {
-  //         _id: 1,
-  //         text: "Hello developer",
-  //         createdAt: new Date(),
-  //         user: {
-  //           _id: 2,
-  //           name: "React Native",
-  //           avatar: `https://placeimg.com/140/140/any`,
-  //         },
-  //       },
-  //       {
-  //         //system message showing the user has entered the chat
-  //         _id: 2,
-  //         text: `${this.props.route.params.name} has entered the chat`,
-  //         createdAt: new Date(),
-  //         system: true,
-  //       },
-  //     ],
-  //   });
-  // }
 
   componentWillUnmount() {
-    this.unsubscribe();
+    this.authUnsubscribe();
+  }
+
+  async getMessages() {
+    let messages = "";
+    try {
+      messages = (await AsyncStorage.getItem("messages")) || [];
+      this.setState({
+        messages: JSON.parse(messages),
+      });
+    } catch (error) {
+      console.log(error.message);
+    }
+  }
+
+  async saveMessages() {
+    try {
+      await AsyncStorage.setItem(
+        "messages",
+        JSON.stringify(this.state.messages)
+      );
+    } catch (error) {
+      console.log(error.message);
+    }
+  }
+
+  async deleteMessages() {
+    try {
+      await AsyncStorage.removeItem("messages");
+      this.setState({
+        messages: [],
+      });
+    } catch (error) {
+      console.log(error.message);
+    }
   }
 
   onCollectionUpdate = (querySnapshot) => {
@@ -112,6 +136,7 @@ export default class Chat extends Component {
         messages: GiftedChat.append(previousState.messages, messages),
       }),
       () => {
+        this.saveMessages();
         this.addMessage();
       }
     );
@@ -140,6 +165,13 @@ export default class Chat extends Component {
         }}
       />
     );
+  }
+
+  renderInputToolbar(props) {
+    if (this.state.isConnected == false) {
+    } else {
+      return <InputToolbar {...props} />;
+    }
   }
 
   render() {

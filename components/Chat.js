@@ -1,13 +1,25 @@
 import React, { Component } from "react";
-import { View, Platform, KeyboardAvoidingView } from "react-native";
+import {
+  View,
+  Platform,
+  KeyboardAvoidingView,
+  Button,
+  Image,
+} from "react-native";
 import { GiftedChat, Bubble, InputToolbar } from "react-native-gifted-chat";
 import NetInfo from "@react-native-community/netinfo";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as Permissions from "expo-permissions";
+import * as ImagePicker from "expo-image-picker";
+import * as Location from "expo-location";
+import MapView from "react-native-maps";
+import CustomActions from "./CustomActions";
 
 const firebase = require("firebase");
 require("firebase/firestore");
 
 export default class Chat extends Component {
+  _isMounted = false;
   constructor(props) {
     super(props);
 
@@ -36,6 +48,8 @@ export default class Chat extends Component {
         name: "",
       },
       isConnected: false,
+      image: null,
+      location: null,
     };
   }
 
@@ -74,6 +88,8 @@ export default class Chat extends Component {
   }
 
   componentDidMount() {
+    this._isMounted = true;
+
     let name = this.props.route.params.name;
     this.props.navigation.setOptions({ title: name });
 
@@ -108,50 +124,52 @@ export default class Chat extends Component {
   }
 
   componentWillUnmount() {
+    this._isMounted = true;
+
     this.authUnsubscribe();
   }
 
   onCollectionUpdate = (querySnapshot) => {
     const messages = [];
-    // go through each document
+
     querySnapshot.forEach((doc) => {
-      // get the QueryDocumentSnapshot's data
       let data = doc.data();
       messages.push({
         _id: data._id,
-        text: data.text,
+        text: data.text || "",
         createdAt: data.createdAt.toDate(),
-        user: {
-          _id: data.user._id,
-          name: data.user.name,
-        },
+        user: data.user,
+        image: data.image || null,
+        location: data.location || null,
       });
     });
+
     this.setState({
       messages,
     });
   };
 
-  onSend(messages = []) {
+  onSend = (messages = []) => {
     this.setState(
       (previousState) => ({
         messages: GiftedChat.append(previousState.messages, messages),
       }),
       () => {
-        this.saveMessages();
         this.addMessage();
+        this.saveMessages();
       }
     );
-  }
+  };
 
   addMessage() {
     const message = this.state.messages[0];
     this.referenceChatMessages.add({
-      uid: this.state.uid,
       _id: message._id,
-      text: message.text,
+      text: message.text || "",
       createdAt: message.createdAt,
       user: message.user,
+      image: message.image || null,
+      location: message.location || null,
     });
   }
 
@@ -176,6 +194,28 @@ export default class Chat extends Component {
     }
   }
 
+  renderCustomActions = (props) => {
+    return <CustomActions {...props} />;
+  };
+
+  renderCustomView(props) {
+    const { currentMessage } = props;
+    if (currentMessage.location) {
+      return (
+        <MapView
+          style={{ width: 150, height: 100, borderRadius: 13, margin: 3 }}
+          region={{
+            latitude: currentMessage.location.latitude,
+            longitude: currentMessage.location.longitude,
+            latitudeDelta: 0.0922,
+            longitudeDelta: 0.0421,
+          }}
+        />
+      );
+    }
+    return null;
+  }
+
   render() {
     let bgColor = this.props.route.params.bgColor;
     return (
@@ -187,6 +227,9 @@ export default class Chat extends Component {
       >
         <GiftedChat
           messages={this.state.messages}
+          isConnected={this.state.isConnected}
+          renderActions={this.renderCustomActions}
+          renderCustomView={this.renderCustomView}
           renderBubble={this.renderBubble.bind(this)}
           renderInputToolbar={this.renderInputToolbar.bind(this)}
           onSend={(messages) => this.onSend(messages)}
